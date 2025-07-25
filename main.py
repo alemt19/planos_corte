@@ -61,15 +61,7 @@ class PlanoDeCorte:
             if fila_fraccionaria_idx == -1:
                 print("\nNo se encontraron más variables fraccionarias. La solución es óptima.")
                 return solucion, -resultado.fun
-
-
-            # Extrae la fila del tableau simplex (en este caso, de las restricciones)
-            # Para simplificar, generamos el corte a partir de una de las restricciones originales
-            # que esté activa y tenga una variable básica fraccionaria.
-            # Una implementación más robusta requeriría el tableau simplex completo.
-
-            # Identificamos la restricción que genera la variable fraccionaria
-            # (Enfoque simplificado para este ejemplo)
+            
             try:
                 # Invertimos la matriz de restricciones activas para obtener el tableau
                 A_inv = np.linalg.inv(self.A)
@@ -122,12 +114,15 @@ if __name__ == '__main__':
 
         # Crea y resuelve el problema
         problema = PlanoDeCorte(c, A, b)
-        solucion_optima, valor_optimo = problema.resolver()
+        resultado = problema.resolver()
 
-        if solucion_optima is not None:
+        if resultado is not None:
+            solucion_optima, valor_optimo = resultado
             print("\n--- Resultados Finales ---")
             print(f"Solución Óptima Entera: {np.round(solucion_optima).astype(int)}")
             print(f"Valor Óptimo de la Función Objetivo: {valor_optimo}")
+        else:
+            print("\nNo se encontró una solución óptima entera.")
 
     except ValueError:
         print("\nError: Por favor, introduce solo valores numéricos.")
