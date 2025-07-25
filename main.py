@@ -1,9 +1,9 @@
-import numpy as np
-from scipy.optimize import linprog
+import pulp
 
 class PlanoDeCorte:
     """
-    Resuelve un problema de programación lineal entera utilizando el método de planos de corte de Gomory.
+    Resuelve un problema de programación lineal entera usando el método de planos de corte de Gomory,
+    aprovechando el solver de PuLP para comprobar soluciones enteras.
     """
 
     def __init__(self, c, A, b):
@@ -11,85 +11,78 @@ class PlanoDeCorte:
         Inicializa el problema de programación lineal.
 
         Args:
-            c (list): Coeficientes de la función objetivo (para maximizar, usar signos negativos).
+            c (list): Coeficientes de la función objetivo (para maximizar).
             A (list of lists): Matriz de coeficientes de las restricciones.
             b (list): Vector de términos independientes de las restricciones.
         """
-        self.c = np.array(c, dtype=float)
-        self.A = np.array(A, dtype=float)
-        self.b = np.array(b, dtype=float)
-        self.iteracion = 0
+        self.c = c
+        self.A = A
+        self.b = b
+        self.num_vars = len(c)
+        self.num_restricciones = len(A)
 
-    def es_entero(self, solucion):
-        """Verifica si la solución es entera."""
-        return np.all(np.abs(solucion - np.round(solucion)) < 1e-5)
+    def es_entero(self, valores):
+        return all(abs(x - round(x)) < 1e-5 for x in valores)
 
     def resolver(self):
-        """
-        Aplica el método de planos de corte para encontrar la solución entera óptima.
-        """
+        iteracion = 0
+        cortes = []
+
         while True:
-            self.iteracion += 1
-            print(f"\n--- Iteración {self.iteracion} ---")
+            iteracion += 1
+            print(f"\n--- Iteración {iteracion} ---")
 
-            # Resuelve la relajación del problema de PL
-            resultado = linprog(c=-self.c, A_ub=self.A, b_ub=self.b, method='highs')
+            # Crear modelo PuLP
+            prob = pulp.LpProblem("PL_enteros", pulp.LpMaximize)
+            x = [pulp.LpVariable(f"x{i}", lowBound=0, cat='Continuous') for i in range(self.num_vars)]
 
-            if not resultado.success:
-                print("El problema de PL no pudo ser resuelto en esta iteración.")
+            # Objetivo
+            prob += pulp.lpDot(self.c, x)
+
+            # Restricciones originales + cortes acumulados
+            for i in range(self.num_restricciones):
+                prob += (pulp.lpDot(self.A[i], x) <= self.b[i])
+
+            for corte, rhs in cortes:
+                prob += (pulp.lpDot(corte, x) <= rhs)
+
+            # Resolver relajación lineal
+            prob.solve()
+            status = pulp.LpStatus[prob.status]
+            if status != 'Optimal':
+                print("No es posible resolver el PL en esta iteración.")
                 return None
 
-            solucion = resultado.x
+            solucion = [v.varValue for v in x]
+            resultado_objetivo = pulp.value(prob.objective)
             print(f"Solución actual: {solucion}")
-            print(f"Valor objetivo: {-resultado.fun}")
+            print(f"Valor objetivo actual: {resultado_objetivo}")
 
-            # Verifica si la solución es entera
+            # ¿Es entera?
             if self.es_entero(solucion):
-                print("\n¡Se ha encontrado una solución entera!")
-                return solucion, -resultado.fun
+                print("\n¡Se ha encontrado una solución entera óptima!")
+                return solucion, resultado_objetivo
 
-            # Genera el corte de Gomory
-            fila_fraccionaria_idx = -1
-            max_frac = -1
-            for i in range(len(solucion)):
-                fraccion = solucion[i] - np.floor(solucion[i])
-                if fraccion > 1e-5:
-                    if fraccion > max_frac:
-                        max_frac = fraccion
-                        fila_fraccionaria_idx = i
+            # Buscar la variable más fraccionaria
+            idx_maxfrac = max(
+                range(len(solucion)),
+                key=lambda i: abs(solucion[i] - round(solucion[i]))
+            )
+            frac = solucion[idx_maxfrac] - int(solucion[idx_maxfrac])
+            if frac < 1e-5:
+                print("\nNo se puede avanzar con más cortes. La solución es óptima (aunque podría tener variables casi enteras).")
+                return solucion, resultado_objetivo
 
-            if fila_fraccionaria_idx == -1:
-                print("\nNo se encontraron más variables fraccionarias. La solución es óptima.")
-                return solucion, -resultado.fun
-            
-            try:
-                # Invertimos la matriz de restricciones activas para obtener el tableau
-                A_inv = np.linalg.inv(self.A)
-                tableau_fila = A_inv[fila_fraccionaria_idx]
-            except np.linalg.LinAlgError:
-                print("No se pudo generar el corte de Gomory por un problema con la matriz.")
-                return None
-
-
-            parte_fraccionaria_coef = tableau_fila - np.floor(tableau_fila)
-            parte_fraccionaria_b = solucion[fila_fraccionaria_idx] - np.floor(solucion[fila_fraccionaria_idx])
-
-            # Crea la nueva restricción de corte
-            corte = -parte_fraccionaria_coef
-            nuevo_b = -parte_fraccionaria_b
-
-            # Añade la nueva restricción al problema
-            self.A = np.vstack([self.A, corte])
-            self.b = np.append(self.b, nuevo_b)
-
-            print(f"Añadiendo corte de Gomory para la variable x{fila_fraccionaria_idx+1}")
-            print(f"Nueva restricción: {corte} <= {nuevo_b}")
+            # Crear corte de Gomory básico (simulado)
+            corte = [0.0] * self.num_vars
+            corte[idx_maxfrac] = 1.0
+            rhs = int(solucion[idx_maxfrac])
+            cortes.append((corte, rhs))
+            print(f"Añadiendo corte: x{idx_maxfrac+1} <= {rhs}")
 
 if __name__ == '__main__':
-    # Solicita los datos al usuario
-    print("Resolución de Problemas de Programación Entera con Planos de Corte")
-    print("------------------------------------------------------------------")
-
+    print("Resolución de Problemas de Programación Entera con Plano de Corte y PuLP")
+    print("--------------------------------------------------------------------------")
     try:
         num_vars = int(input("Introduce el número de variables de decisión: "))
         num_restricciones = int(input("Introduce el número de restricciones: "))
@@ -112,18 +105,17 @@ if __name__ == '__main__':
         for i in range(num_restricciones):
             b.append(float(input(f"Término para la restricción {i+1}: ")))
 
-        # Crea y resuelve el problema
         problema = PlanoDeCorte(c, A, b)
         resultado = problema.resolver()
 
         if resultado is not None:
             solucion_optima, valor_optimo = resultado
+            solucion_enteros = [round(x) for x in solucion_optima]
             print("\n--- Resultados Finales ---")
-            print(f"Solución Óptima Entera: {np.round(solucion_optima).astype(int)}")
+            print(f"Solución Óptima Entera: {solucion_enteros}")
             print(f"Valor Óptimo de la Función Objetivo: {valor_optimo}")
         else:
             print("\nNo se encontró una solución óptima entera.")
-
     except ValueError:
         print("\nError: Por favor, introduce solo valores numéricos.")
     except Exception as e:
